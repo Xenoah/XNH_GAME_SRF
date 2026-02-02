@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyRacers FPV</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Scrollbar & Range Input */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        input[type=range] { height: 0.5rem; background-color: #374151; border-radius: 0.5rem; appearance: none; cursor: pointer; }
+        
+        /* Loading Overlay */
+        #loading-screen {
+            position: fixed; inset: 0; background: #000; z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: white; font-family: monospace; transition: opacity 0.5s;
+        }
+
+        /* Controller Focus State */
+        .btn-focus {
+            outline: 2px solid #3b82f6;
+            outline-offset: 2px;
+            transform: scale(1.05);
+            background-color: #1f2937; /* Gray-800 equivalent */
+        }
+        .btn-primary.btn-focus {
+            background-color: #2563eb; /* Blue-600 */
+        }
+    </style>
+    <!-- Import Three.js Map (Using esm.sh for better stability) -->
+    <script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.160.0",
+    "zustand": "https://esm.sh/zustand@^5.0.11",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.5.0",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.7",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-black text-white select-none overflow-hidden w-full h-screen relative font-sans">
+
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="text-xl animate-pulse">INITIALIZING ENGINES...</div>
+        <div class="text-xs text-gray-500 mt-4">Requiring Internet Connection for Assets</div>
+    </div>
+    <script>
+        window.onerror = function(msg, url, line) {
+            const el = document.getElementById('loading-screen');
+            el.style.background = "#110000";
+            el.innerHTML = `<div style="color:#ff5555; text-align:center; padding:20px;">
+                <h2 style="font-size:24px; margin-bottom:10px;">SYSTEM FAILURE</h2>
+                <p>${msg}</p>
+                <p style="color:#888; font-size:12px; margin-top:10px;">If running locally, ensure you have internet access for CDN assets.</p>
+            </div>`;
+        };
+    </script>
+
+    <!-- 3D Container -->
+    <div id="canvas-container" class="absolute inset-0 z-0 bg-gradient-to-b from-sky-900 to-black"></div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="absolute inset-0 z-10 pointer-events-none hidden">
+
+        <!-- SCREEN: Main Menu -->
+        <div id="screen-menu" class="screen absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto transition-opacity duration-500">
+            <div class="absolute top-4 right-4 flex gap-4">
+                 <button id="btn-lang" class="px-3 py-1 rounded border border-gray-600 hover:bg-gray-800 text-xs text-gray-400">EN / JP</button>
+            </div>
+            
+            <h1 class="text-6xl md:text-8xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 drop-shadow-2xl mb-8 text-center">
+                SKY RACERS <span class="text-xl md:text-2xl block text-white font-normal tracking-widest mt-2">FPV SIMULATOR</span>
+            </h1>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-lg px-4">
+                <button id="btn-mode-timeattack" class="btn-primary px-6 py-3 rounded font-bold uppercase tracking-wider transition-transform transform hover:scale-105 active:scale-95 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/50 flex justify-center items-center gap-2">
+                    Start Racing
+                </button>
+                <button id="btn-mode-freeselect" class="px-6 py-3 rounded font-bold uppercase tracking-wider transition-transform transform hover:scale-105 active:scale-95 bg-gray-800 hover:bg-gray-700 text-gray-100 border border-gray-600">
+                    Free Flight
+                </button>
+                <button id="btn-settings-open" class="px-6 py-3 rounded font-bold uppercase tracking-wider transition-transform transform hover:scale-105 active:scale-95 bg-gray-800 hover:bg-gray-700 text-gray-100 border border-gray-600 md:col-span-2">
+                    Settings
+                </button>
+            </div>
+            <div class="absolute bottom-8 text-gray-500 text-sm">
+                🎮 Xbox Controller (A=Select, B=Back) / Keyboard
+            </div>
+        </div>
+
+        <!-- SCREEN: Time Attack Select -->
+        <div id="screen-select" class="screen hidden absolute inset-0 flex flex-col bg-gray-900/95 p-8 pointer-events-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 id="txt-prep" class="text-3xl font-bold italic">FLIGHT PREP</h2>
+                <button id="btn-back-menu" class="px-4 py-2 rounded bg-gray-800 hover:bg-gray-700 border border-gray-600">Back</button>
+            </div>
+            <div class="flex gap-4 mb-6">
+                <button id="tab-tracks" class="px-6 py-2 rounded font-bold bg-blue-600 text-white">Tracks</button>
+                <button id="tab-drones" class="px-6 py-2 rounded font-bold bg-gray-800 text-gray-400 hover:text-white">Garage</button>
+            </div>
+            
+            <!-- Dynamic Content -->
+            <div id="selection-grid" class="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4 pr-2 pb-20"></div>
+            
+            <!-- Custom Drone Tuning Panel (Hidden by default) -->
+            <div id="custom-drone-panel" class="hidden bg-gray-800 p-4 rounded border border-gray-700 mb-4">
+                <h3 class="font-bold mb-4 text-blue-400">CUSTOM TUNING</h3>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="flex justify-between text-xs text-gray-400">Speed <span id="val-cust-speed">50</span></label>
+                        <input type="range" id="input-cust-speed" min="20" max="100" value="50" class="w-full accent-blue-500">
+                    </div>
+                    <div>
+                        <label class="flex justify-between text-xs text-gray-400">Agility <span id="val-cust-agility">4.0</span></label>
+                        <input type="range" id="input-cust-agility" min="1" max="10" step="0.1" value="4.0" class="w-full accent-green-500">
+                    </div>
+                    <div>
+                        <label class="flex justify-between text-xs text-gray-400">Weight <span id="val-cust-weight">1.0</span></label>
+                        <input type="range" id="input-cust-weight" min="0.5" max="3.0" step="0.1" value="1.0" class="w-full accent-orange-500">
+                    </div>
+                </div>
+            </div>
+
+            <div class="absolute bottom-0 left-0 right-0 p-6 bg-gray-900 border-t border-gray-800 flex justify-end">
+                <button id="btn-start-race" class="px-8 py-3 rounded font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    Start Race
+                </button>
+            </div>
+        </div>
+
+        <!-- SCREEN: Open World Select -->
+        <div id="screen-freeselect" class="screen hidden absolute inset-0 flex flex-col items-center justify-center bg-gray-900/95 pointer-events-auto">
+            <h2 id="txt-select-terrain" class="text-3xl font-bold mb-8">SELECT TERRAIN</h2>
+            <div class="grid grid-cols-2 gap-4 w-full max-w-lg" id="terrain-grid"></div>
+            <button id="btn-back-free" class="mt-8 px-6 py-2 rounded bg-gray-800 border border-gray-600 hover:bg-gray-700">Back</button>
+        </div>
+
+        <!-- HUD: In-Game -->
+        <div id="screen-hud" class="screen hidden absolute inset-0 pointer-events-none p-4 md:p-6 flex flex-col justify-between">
+            <div class="flex justify-between items-start pointer-events-auto">
+                <div class="bg-black/40 backdrop-blur px-4 py-2 rounded-lg border border-white/10 flex gap-4 text-sm font-mono">
+                    <div class="flex flex-col">
+                        <span class="text-[10px] text-gray-400 uppercase tracking-widest">Battery</span>
+                        <div id="hud-battery" class="text-green-400">16.8V</div>
+                    </div>
+                    <div class="w-px h-8 bg-white/20"></div>
+                    <div class="flex flex-col">
+                        <span class="text-[10px] text-gray-400 uppercase tracking-widest">Health</span>
+                        <div id="hud-health" class="text-blue-400">100%</div>
+                    </div>
+                </div>
+
+                <div id="hud-timer-container" class="bg-black/40 backdrop-blur px-6 py-2 rounded-lg border border-white/10 flex flex-col items-center min-w-[120px]">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-widest">Time</span>
+                    <span id="hud-timer" class="text-3xl font-mono font-bold text-yellow-400">READY</span>
+                </div>
+
+                <button id="btn-pause" class="bg-black/40 hover:bg-black/60 backdrop-blur p-3 rounded-lg border border-white/10 text-white pointer-events-auto">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+            </div>
+
+            <div id="mission-start-msg" class="absolute top-1/4 left-0 right-0 text-center pointer-events-none transition-opacity duration-500">
+                <h2 class="text-4xl md:text-6xl font-black italic text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 drop-shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-pulse">MISSION START</h2>
+                <p id="txt-mission-sub" class="text-blue-200 mt-2 bg-black/50 inline-block px-4 py-1 rounded backdrop-blur">Fly through the first gate!</p>
+            </div>
+
+            <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white/30">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            </div>
+
+            <div id="input-viz-container" class="absolute bottom-24 right-6 bg-black/40 border border-white/10 rounded p-2 hidden">
+                <canvas id="input-canvas" width="140" height="70"></canvas>
+                <div class="text-center text-[10px] text-gray-500 mt-1">INPUT</div>
+            </div>
+
+            <div class="flex justify-between items-end pointer-events-auto">
+                <div class="bg-black/40 backdrop-blur p-4 rounded-lg hidden md:block">
+                    <!-- Controller Instructions -->
+                    <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs font-mono text-gray-300">
+                         <div class="col-span-2 border-b border-gray-600 mb-1 pb-1 font-bold text-white">CONTROLS (Gamepad / Keyboard)</div>
+                        <span>Pitch/Roll: R-Stick / Arrows</span>
+                        <span>Throttle: L-Stick(Y) / W,S</span>
+                        <span>Yaw: L-Stick(X) / A,D</span>
+                        <span>Pause: Start / ESC</span>
+                        <span>Reset: X / R</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POPUP: Race Finished -->
+        <div id="popup-finish" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md pointer-events-auto">
+            <div class="bg-gray-900/90 border border-blue-500/30 p-8 rounded-2xl text-center shadow-2xl max-w-md w-full mx-4">
+                <h2 class="text-4xl font-bold mb-2 italic text-white">COURSE COMPLETE</h2>
+                <p id="finish-time" class="text-6xl font-mono text-green-400 mb-8 font-bold tracking-tighter">00.00s</p>
+                <div class="flex flex-col gap-3">
+                    <button id="btn-finish-reset" class="w-full px-6 py-3 rounded font-bold uppercase bg-blue-600 hover:bg-blue-500 text-white">Replay Course</button>
+                    <button id="btn-finish-menu" class="w-full px-6 py-3 rounded font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Back to Menu</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- POPUP: Pause Menu -->
+        <div id="popup-pause" class="hidden absolute inset-0 z-50 bg-black/70 backdrop-blur flex items-center justify-center pointer-events-auto">
+            <div class="bg-gray-900 border border-gray-700 p-8 rounded-xl shadow-2xl w-80 text-center space-y-4">
+                <h2 class="text-2xl font-bold text-white">PAUSED</h2>
+                <button id="btn-resume" class="w-full px-6 py-2 rounded font-bold uppercase bg-blue-600 hover:bg-blue-500 text-white">Resume</button>
+                <button id="btn-settings-pause" class="w-full px-6 py-2 rounded font-bold uppercase bg-gray-800 hover:bg-gray-700 text-white border border-gray-600">Settings</button>
+                <button id="btn-restart" class="w-full px-6 py-2 rounded font-bold uppercase bg-gray-800 hover:bg-gray-700 text-white border border-gray-600">Restart</button>
+                <button id="btn-quit" class="w-full px-6 py-2 rounded font-bold uppercase bg-red-600 hover:bg-red-500 text-white">Quit to Menu</button>
+            </div>
+        </div>
+
+        <!-- POPUP: Settings -->
+        <div id="popup-settings" class="hidden absolute inset-0 z-60 bg-black/90 flex items-center justify-center pointer-events-auto p-4 overflow-y-auto">
+            <div class="bg-gray-800 p-6 md:p-8 rounded-xl w-full max-w-lg text-white shadow-2xl my-auto">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold flex items-center gap-2">SETTINGS</h2>
+                    <button id="btn-close-settings" class="px-4 py-1 rounded bg-gray-700 hover:bg-gray-600">Close</button>
+                </div>
+                <div class="space-y-6">
+                    <!-- Data Management -->
+                     <div class="bg-black/30 p-4 rounded border border-gray-700">
+                        <h3 class="text-sm font-bold text-gray-400 mb-2">DATA MANAGEMENT</h3>
+                        <div class="flex gap-2">
+                            <button id="btn-export" class="flex-1 px-3 py-2 bg-blue-900/50 hover:bg-blue-800 border border-blue-800 rounded text-xs">Export Save (JSON)</button>
+                            <button id="btn-import" class="flex-1 px-3 py-2 bg-green-900/50 hover:bg-green-800 border border-green-800 rounded text-xs">Import Save (JSON)</button>
+                            <input type="file" id="file-import" class="hidden" accept=".json">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="flex justify-between mb-2 text-gray-300 font-mono text-sm">Master Volume <span id="val-volume">40%</span></label>
+                        <input type="range" id="input-volume" min="0" max="1" step="0.1" value="0.4" class="w-full accent-blue-500">
+                    </div>
+                    <div class="border-t border-gray-700 pt-4">
+                        <h3 class="text-lg font-bold mb-4 text-blue-400">FLIGHT CONTROLLER</h3>
+                        <label class="flex justify-between mb-2 text-gray-300 font-mono text-sm">RC Rate (Sensitivity) <span id="val-rate">1.0</span></label>
+                        <input type="range" id="input-rate" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-green-500 mb-4">
+                        <label class="flex justify-between mb-2 text-gray-300 font-mono text-sm">Expo (Curve) <span id="val-expo">0.2</span></label>
+                        <input type="range" id="input-expo" min="0" max="0.8" step="0.1" value="0.2" class="w-full accent-purple-500 mb-4">
+                        <label class="flex justify-between mb-2 text-gray-300 font-mono text-sm">Deadzone <span id="val-deadzone">0.05</span></label>
+                        <input type="range" id="input-deadzone" min="0" max="0.2" step="0.01" value="0.05" class="w-full accent-red-500">
+                    </div>
+                    <div class="flex items-center gap-3 mt-4 bg-black/20 p-3 rounded">
+                        <input type="checkbox" id="input-show" class="w-5 h-5 rounded accent-blue-500">
+                        <label for="input-show" class="text-gray-300 text-sm cursor-pointer select-none">Show Controller Input Overlay</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- LOCALIZATION ---
+        const TEXT = {
+            EN: {
+                startRace: "Start Racing",
+                freeFlight: "Free Flight",
+                settings: "Settings",
+                back: "Back",
+                tracks: "Tracks",
+                garage: "Garage",
+                prep: "FLIGHT PREP",
+                selectTerrain: "SELECT TERRAIN",
+                missionStart: "MISSION START",
+                missionSub: "Fly through the first gate!",
+                courseComplete: "COURSE COMPLETE",
+                replay: "Replay Course",
+                toMenu: "Back to Menu",
+                resume: "Resume",
+                restart: "Restart",
+                quit: "Quit to Menu",
+                custom: "CUSTOM TUNING"
+            },
+            JP: {
+                startRace: "レース開始",
+                freeFlight: "フリーフライト",
+                settings: "設定",
+                back: "戻る",
+                tracks: "コース",
+                garage: "ガレージ",
+                prep: "フライト準備",
+                selectTerrain: "地形選択",
+                missionStart: "ミッション開始",
+                missionSub: "最初のゲートを通過せよ！",
+                courseComplete: "コースクリア",
+                replay: "リプレイ",
+                toMenu: "メニューへ戻る",
+                resume: "再開",
+                restart: "リスタート",
+                quit: "終了してメニューへ",
+                custom: "機体チューニング"
+            }
+        };
+
+        // --- DATA & CONSTANTS ---
+        const CONSTANTS = {
+            GRAVITY: 25.0,
+            TERRAINS: { PLAINS: 'Plains', MOUNTAINS: 'Mountains', STADIUM: 'Stadium', RUINS: 'Ruins' },
+            DRONES: [
+                { id: 'starter', name: 'Novice X1', speed: 40, agility: 3.5, weight: 1.2, color: 0x3b82f6 },
+                { id: 'racer', name: 'Velocity MK-II', speed: 65, agility: 5.0, weight: 0.9, color: 0xef4444 },
+                { id: 'freestyle', name: 'FlowMaster 5', speed: 55, agility: 6.5, weight: 1.0, color: 0x10b981 },
+                { id: 'beast', name: 'Iron Clad Heavy', speed: 80, agility: 2.5, weight: 2.0, color: 0xf59e0b },
+                { id: 'custom', name: 'Custom Build', speed: 50, agility: 4.0, weight: 1.0, color: 0xa855f7 }, // Placeholder
+            ]
+        };
+
+        const TRACKS = Array.from({ length: 40 }, (_, i) => {
+            let t = CONSTANTS.TERRAINS.PLAINS;
+            if (i % 4 === 1) t = CONSTANTS.TERRAINS.MOUNTAINS;
+            if (i % 4 === 2) t = CONSTANTS.TERRAINS.RUINS;
+            if (i % 4 === 3) t = CONSTANTS.TERRAINS.STADIUM;
+            return {
+                id: i + 1,
+                name: `Sector ${Math.floor(i / 4) + 1}-${(i % 4) + 1}`,
+                seed: 1337 + i * 542,
+                gates: 5 + Math.floor(i / 5),
+                terrain: t
+            };
+        });
+
+        // --- GAME STATE ---
+        const state = {
+            lang: 'EN',
+            mode: 'MENU',
+            isPaused: false,
+            track: null,
+            droneId: 'starter',
+            terrain: CONSTANTS.TERRAINS.PLAINS,
+            customStats: { speed: 50, agility: 4.0, weight: 1.0 },
+            
+            // Physics
+            pos: new THREE.Vector3(0, 2, 0),
+            quat: new THREE.Quaternion(),
+            vel: new THREE.Vector3(),
+            angVel: new THREE.Vector3(),
+            throttleStick: 0,
+            
+            // Race
+            status: 'READY',
+            startTime: 0,
+            finishTime: 0,
+            currentGate: 0,
+            health: 100,
+            battery: 16.8, 
+            
+            settings: { volume: 0.4, rate: 1.0, expo: 0.2, deadzone: 0.05, showInput: false },
+            
+            // Controller
+            lastControls: { throttle: 0, yaw: 0, pitch: 0, roll: 0 },
+            btnState: {}, // Track previous frame button state for debouncing
+            menuIndex: 0 // Virtual focus index
+        };
+
+        // --- HELPER: Terrain Height ---
+        function getTerrainHeight(x, y, type) {
+            let h = 0;
+            if (type === CONSTANTS.TERRAINS.MOUNTAINS) {
+                h += Math.sin(x*0.01 + y*0.01)*20 + Math.sin(x*0.03)*10;
+                const p = Math.max(0, Math.sin(x*0.005)+Math.cos(y*0.005));
+                h += Math.pow(p, 4)*150;
+            } else if (type === CONSTANTS.TERRAINS.RUINS) {
+                h = Math.sin(x*0.05) + Math.cos(y*0.05);
+            } else if (type === CONSTANTS.TERRAINS.STADIUM) {
+                h = (Math.abs(x)>400 || Math.abs(y)>400) ? 50 : 0;
+            } else {
+                h += Math.sin(x*0.02)*5 + Math.cos(y*0.02)*5;
+            }
+            if (Math.sqrt(x*x+y*y) < 40) h *= (Math.sqrt(x*x+y*y)/40);
+            return h;
+        }
+
+        // --- AUDIO ---
+        const audio = {
+            ctx: null, gain: null, osc1: null, osc2: null,
+            init() {
+                if (this.ctx) return;
+                const AC = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AC();
+                this.gain = this.ctx.createGain();
+                this.gain.connect(this.ctx.destination);
+                this.gain.gain.value = 0;
+                
+                const makeOsc = (detune) => {
+                    const o = this.ctx.createOscillator();
+                    o.type = 'sawtooth';
+                    o.frequency.value = 60;
+                    o.detune.value = detune;
+                    o.connect(this.gain);
+                    o.start();
+                    return o;
+                };
+                this.osc1 = makeOsc(0);
+                this.osc2 = makeOsc(15);
+            },
+            update(throt) {
+                if (!this.ctx) return;
+                if (state.isPaused || state.mode === 'MENU') {
+                    this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+                    return;
+                }
+                const vol = throt * 0.3 * state.settings.volume;
+                const freq = 60 + (throt * 300);
+                this.gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.1);
+                this.osc1.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.1);
+                this.osc2.frequency.setTargetAtTime(freq + 10 + (throt * 5), this.ctx.currentTime, 0.1);
+            },
+            playSE(type) {
+                if(!this.ctx || state.settings.volume <= 0) return;
+                const now = this.ctx.currentTime;
+                const vol = state.settings.volume * 0.5;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                if (type === 'checkpoint') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(1200, now);
+                    osc.frequency.exponentialRampToValueAtTime(1800, now + 0.1);
+                    gain.gain.setValueAtTime(vol, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (type === 'finish') {
+                    osc.type = 'square';
+                    [0, 0.15, 0.3].forEach((t, i) => {
+                        const o = this.ctx.createOscillator();
+                        const g = this.ctx.createGain();
+                        o.connect(g); g.connect(this.ctx.destination);
+                        const f = i===0?440: (i===1?554:659); 
+                        o.frequency.value = f;
+                        g.gain.setValueAtTime(vol, now+t);
+                        g.gain.exponentialRampToValueAtTime(0.01, now+t+0.5);
+                        o.start(now+t); o.stop(now+t+0.5);
+                    });
+                }
+            },
+            resume() { 
+                if(this.ctx?.state === 'suspended') this.ctx.resume();
+                if(!this.ctx) this.init();
+            }
+        };
+
+        // --- THREE.JS ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x0c4a6e, 20, 500);
+
+        const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        sun.position.set(100, 200, 100);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 2048; 
+        sun.shadow.mapSize.height = 2048;
+        sun.shadow.camera.top = 200; sun.shadow.camera.bottom = -200;
+        sun.shadow.camera.left = -200; sun.shadow.camera.right = 200;
+        scene.add(sun);
+
+        const skyGeo = new THREE.BoxGeometry(1000, 1000, 1000);
+        const skyMat = new THREE.MeshBasicMaterial({ color: 0x0c4a6e, side: THREE.BackSide });
+        scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+        const worldGroup = new THREE.Group();
+        scene.add(worldGroup);
+
+        // --- INPUT & CONTROLS ---
+        const keys = {};
+        window.addEventListener('keydown', e => { keys[e.key] = true; if(e.key === 'Escape') togglePause(); audio.resume(); });
+        window.addEventListener('keyup', e => keys[e.key] = false);
+        window.addEventListener('click', () => audio.resume());
+
+        function getControls() {
+            const gp = navigator.getGamepads()[0];
+            let throt = 0, yaw = 0, pitch = 0, roll = 0, reset = false;
+
+            if (gp) {
+                throt = Math.max(0, -gp.axes[1]);
+                yaw = -gp.axes[0];
+                pitch = gp.axes[3];
+                roll = gp.axes[2];
+                reset = gp.buttons[2]?.pressed; // X
+                
+                // Pause (Start=9)
+                if (gp.buttons[9]?.pressed && !state.btnState[9]) togglePause();
+                state.btnState[9] = gp.buttons[9]?.pressed;
+
+            } else {
+                if (keys['w'] || keys['W']) state.throttleStick = Math.min(1, state.throttleStick + 0.05);
+                else if (keys['s'] || keys['S']) state.throttleStick = Math.max(0, state.throttleStick - 0.05);
+                else state.throttleStick = Math.max(0, state.throttleStick - 0.1); // Auto-return
+                throt = state.throttleStick;
+                
+                if (keys['a'] || keys['A']) yaw = 1;
+                if (keys['d'] || keys['D']) yaw = -1;
+                if (keys['ArrowUp']) pitch = -1;
+                if (keys['ArrowDown']) pitch = 1;
+                if (keys['ArrowLeft']) roll = -1;
+                if (keys['ArrowRight']) roll = 1;
+                reset = keys['r'] || keys['R'];
+            }
+
+            // Curves
+            const dz = state.settings.deadzone;
+            const apply = (v) => {
+                if(Math.abs(v) < dz) return 0;
+                const raw = (Math.abs(v) - dz) / (1 - dz);
+                const curved = raw * (1 - state.settings.expo) + Math.pow(raw, 3) * state.settings.expo;
+                return Math.sign(v) * curved * state.settings.rate;
+            };
+
+            return { throttle: throt, yaw: apply(yaw), pitch: apply(pitch), roll: apply(roll), reset };
+        }
+
+        // --- MENU NAVIGATION (CONTROLLER) ---
+        function updateMenuNavigation() {
+            // Only runs if NOT racing/openworld or if Paused
+            if (['RACING', 'OPEN_WORLD'].includes(state.mode) && !state.isPaused) return;
+
+            const gp = navigator.getGamepads()[0];
+            if (!gp) return;
+
+            // Find all interactive elements in the currently visible screen/popup
+            const visibleScreens = Array.from(document.querySelectorAll('.screen:not(.hidden), div[id^="popup-"]:not(.hidden)'));
+            // Use the last visible one (topmost popup)
+            const activeContainer = visibleScreens[visibleScreens.length - 1];
+            if (!activeContainer) return;
+
+            const interactables = Array.from(activeContainer.querySelectorAll('button:not(:disabled), input[type="range"]'));
+            if (interactables.length === 0) return;
+
+            // Debounce D-pad
+            const now = Date.now();
+            if (now - (state.lastMenuMove || 0) < 150) return;
+
+            let move = 0;
+            // D-Pad Up/Down/Left/Right or Stick
+            if (gp.axes[1] < -0.5 || gp.buttons[12]?.pressed) move = -1; // Up
+            if (gp.axes[1] > 0.5 || gp.buttons[13]?.pressed) move = 1; // Down
+            if (gp.axes[0] < -0.5 || gp.buttons[14]?.pressed) move = -1; // Left
+            if (gp.axes[0] > 0.5 || gp.buttons[15]?.pressed) move = 1; // Right
+
+            if (move !== 0) {
+                state.lastMenuMove = now;
+                state.menuIndex += move;
+                // Wrap around
+                if (state.menuIndex < 0) state.menuIndex = interactables.length - 1;
+                if (state.menuIndex >= interactables.length) state.menuIndex = 0;
+                
+                // Focus
+                interactables.forEach(el => el.classList.remove('btn-focus'));
+                interactables[state.menuIndex].classList.add('btn-focus');
+                interactables[state.menuIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            // Select (A button = 0)
+            if (gp.buttons[0]?.pressed && !state.btnState[0]) {
+                state.btnState[0] = true;
+                interactables[state.menuIndex].click();
+            } else if (!gp.buttons[0]?.pressed) {
+                state.btnState[0] = false;
+            }
+
+            // Back (B button = 1)
+            if (gp.buttons[1]?.pressed && !state.btnState[1]) {
+                state.btnState[1] = true;
+                // Try find a "Back" or "Close" button
+                const closeBtn = activeContainer.querySelector('#btn-back-menu, #btn-back-free, #btn-close-settings, #btn-quit, #btn-finish-menu');
+                if (closeBtn) closeBtn.click();
+            } else if (!gp.buttons[1]?.pressed) {
+                state.btnState[1] = false;
+            }
+        }
+
+        // --- PHYSICS UPDATE ---
+        function updatePhysics(dt) {
+            if (state.isPaused) return;
+
+            const c = getControls();
+            state.lastControls = c;
+            if(c.reset) { resetRace(); return; }
+
+            audio.update(c.throttle);
+
+            // Battery
+            const voltageDraw = (0.001 + (c.throttle * 0.05)) * dt;
+            state.battery = Math.max(0, state.battery - voltageDraw);
+
+            // Get Stats (Check for custom)
+            let stats = CONSTANTS.DRONES.find(d => d.id === state.droneId);
+            if (state.droneId === 'custom') {
+                stats = { ...stats, ...state.customStats };
+            }
+
+            // Physics
+            const rs = stats.agility * 2.5;
+            const targetAv = new THREE.Vector3(c.pitch * rs, c.yaw * rs, -c.roll * rs);
+            state.angVel.lerp(targetAv, 12 * dt);
+            
+            const qStep = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+                state.angVel.x * dt, state.angVel.y * dt, state.angVel.z * dt, 'YXZ'
+            ));
+            state.quat.multiply(qStep);
+
+            const thrust = new THREE.Vector3(0, 1, 0).applyQuaternion(state.quat)
+                .multiplyScalar(c.throttle * stats.speed * 4.0 * dt);
+            const grav = new THREE.Vector3(0, -CONSTANTS.GRAVITY * stats.weight, 0).multiplyScalar(dt);
+            
+            state.vel.multiplyScalar(0.995).add(thrust).add(grav);
+            
+            // Collision
+            const terrainH = getTerrainHeight(state.pos.x, state.pos.z, state.terrain);
+            if (state.pos.y < terrainH + 0.5) {
+                state.pos.y = terrainH + 0.5;
+                if (state.vel.y < -5) {
+                    state.health = Math.max(0, state.health - Math.abs(state.vel.y));
+                }
+                state.vel.y *= -0.3;
+                state.vel.multiplyScalar(0.8);
+            }
+            state.pos.add(state.vel.clone().multiplyScalar(dt));
+
+            // Logic
+            if (state.mode === 'RACING' && state.gates) {
+                if (state.status !== 'FINISHED' && state.currentGate < state.gates.length) {
+                    const g = state.gates[state.currentGate];
+                    if (state.pos.distanceTo(g.posVec) < 5) {
+                        // Start
+                        if (state.currentGate === 0 && state.status === 'READY') {
+                            state.status = 'RUNNING';
+                            state.startTime = Date.now();
+                            document.getElementById('mission-start-msg').classList.add('opacity-0');
+                        }
+                        state.currentGate++;
+                        audio.playSE('checkpoint');
+                        
+                        // Finish
+                        if (state.currentGate >= state.gates.length) {
+                            state.status = 'FINISHED';
+                            state.finishTime = (Date.now() - state.startTime) / 1000;
+                            audio.playSE('finish');
+                            showPopup('popup-finish');
+                            // Fix: Update popup text immediately
+                            document.getElementById('finish-time').textContent = state.finishTime.toFixed(2) + 's';
+                        }
+                        rebuildGates();
+                    }
+                }
+                // Check for gate 0 to restart when finished
+                if (state.status === 'FINISHED') {
+                    if (state.pos.distanceTo(state.gates[0].posVec) < 5) restartLap();
+                }
+            }
+        }
+
+        // --- RENDER/WORLD ---
+        function generateWorld(type, seed, gateCount) {
+            state.terrain = type;
+            while(worldGroup.children.length) {
+                const o = worldGroup.children[0];
+                worldGroup.remove(o);
+                if(o.geometry) o.geometry.dispose();
+                if(o.material) o.material.dispose();
+            }
+
+            const geo = new THREE.PlaneGeometry(1000, 1000, 128, 128);
+            const pos = geo.attributes.position;
+            const colors = [];
+            const col = new THREE.Color();
+            
+            const cSand=new THREE.Color("#d4b483"), cGrass=new THREE.Color("#15803d");
+            const cDirt=new THREE.Color("#5d4037"), cRock=new THREE.Color("#4b5563");
+            
+            for(let i=0; i<pos.count; i++) {
+                const x = pos.getX(i), y = pos.getY(i);
+                const h = getTerrainHeight(x, y, type);
+                pos.setZ(i, h);
+                if(h<2) col.copy(cSand); else if(h<15) col.copy(cGrass); else if(h<40) col.copy(cDirt); else col.copy(cRock);
+                colors.push(col.r, col.g, col.b);
+            }
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geo.computeVertexNormals();
+            const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+            mesh.rotation.x = -Math.PI/2;
+            mesh.position.y = -2;
+            mesh.receiveShadow = true;
+            worldGroup.add(mesh);
+
+            state.gates = [];
+            if (gateCount > 0) {
+                const rnd = s => Math.sin(s)*10000 - Math.floor(Math.sin(s)*10000);
+                let cx=0, cz=0, cy=5, ang=0;
+                for(let i=0; i<gateCount; i++) {
+                    const s = seed + i;
+                    ang += (rnd(s)-0.5)*1.5;
+                    const dist = 30 + rnd(s+1)*20;
+                    cx += Math.sin(ang)*dist;
+                    cz += Math.cos(ang)*dist;
+                    const groundH = getTerrainHeight(cx, cz, type);
+                    cy = Math.max(groundH + 10, Math.min(groundH + 60, cy + (rnd(s+2)-0.5)*10));
+                    state.gates.push({ posVec: new THREE.Vector3(cx, cy, cz), rotEuler: new THREE.Euler(0, -ang, 0), id: i });
+                }
+                rebuildGates();
+            }
+        }
+
+        function rebuildGates() {
+            worldGroup.children = worldGroup.children.filter(o => !o.userData.isGate);
+            state.gates.forEach((g, i) => {
+                const isNext = i === state.currentGate;
+                const isPassed = i < state.currentGate;
+                const col = isPassed ? 0x10b981 : (isNext ? 0xf59e0b : 0x3b82f6);
+                const torus = new THREE.Mesh(new THREE.TorusGeometry(3, 0.2, 16, 8), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: isNext?2:0.5 }));
+                torus.position.copy(g.posVec); torus.rotation.copy(g.rotEuler); torus.userData.isGate = true;
+                worldGroup.add(torus);
+                if (isNext) {
+                    const light = new THREE.PointLight(col, 3, 15); light.position.copy(g.posVec); light.userData.isGate = true; worldGroup.add(light);
+                    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 200, 8), new THREE.MeshBasicMaterial({ color: 0xfcd34d, transparent: true, opacity: 0.2, depthWrite: false }));
+                    beam.position.set(g.posVec.x, 100, g.posVec.z); beam.userData.isGate = true; worldGroup.add(beam);
+                }
+            });
+        }
+
+        // --- INIT & UI LOGIC ---
+        function initGame(mode, arg) {
+            state.mode = mode;
+            state.isPaused = false;
+            state.status = 'READY';
+            state.startTime = 0;
+            state.currentGate = 0;
+            state.health = 100;
+            state.battery = 16.8;
+            state.throttleStick = 0;
+            state.vel.set(0,0,0); state.angVel.set(0,0,0); state.pos.set(0, 2, 0); state.quat.identity();
+
+            let seed=123, cnt=0, type=CONSTANTS.TERRAINS.PLAINS;
+            if (mode === 'RACING') {
+                const t = TRACKS.find(tr => tr.id === arg);
+                state.track = t; seed = t.seed; cnt = t.gates; type = t.terrain;
+                const rnd = s => Math.sin(s)*10000 - Math.floor(Math.sin(s)*10000);
+                const ang = (rnd(seed)-0.5)*1.5;
+                const dist = 30 + rnd(seed+1)*20;
+                const target = new THREE.Vector3(Math.sin(ang)*dist, 0, Math.cos(ang)*dist);
+                state.pos.set(0, getTerrainHeight(0,0,type)+2, 0);
+                state.quat.setFromUnitVectors(new THREE.Vector3(0,0,-1), target.normalize());
+            } else if (mode === 'OPEN_WORLD') {
+                type = arg; state.pos.set(0, getTerrainHeight(0,0,type)+2, 0);
+            } else {
+                type = CONSTANTS.TERRAINS.MOUNTAINS;
+            }
+            generateWorld(type, seed, cnt);
+            updateUI();
+        }
+
+        function resetRace() { initGame(state.mode, state.track?.id || state.terrain); }
+        function restartLap() {
+            state.status = 'RUNNING'; state.startTime = Date.now(); state.currentGate = 1;
+            state.health = 100; state.battery = 16.8;
+            document.getElementById('popup-finish').classList.add('hidden');
+            rebuildGates();
+        }
+        function togglePause() {
+            if (state.mode === 'MENU') return;
+            state.isPaused = !state.isPaused;
+            updateUI();
+            const p = document.getElementById('popup-pause');
+            state.isPaused ? p.classList.remove('hidden') : p.classList.add('hidden');
+        }
+
+        // --- TRANSLATION ---
+        function updateText() {
+            const T = TEXT[state.lang];
+            const setTxt = (id, txt) => { const el = document.getElementById(id); if(el) el.textContent = txt; };
+            
+            setTxt('btn-mode-timeattack', T.startRace);
+            setTxt('btn-mode-freeselect', T.freeFlight);
+            setTxt('btn-settings-open', T.settings);
+            setTxt('btn-settings-pause', T.settings);
+            
+            setTxt('btn-back-menu', T.back);
+            setTxt('btn-back-free', T.back);
+            setTxt('tab-tracks', T.tracks);
+            setTxt('tab-drones', T.garage);
+            setTxt('txt-prep', T.prep);
+            setTxt('btn-start-race', T.startRace);
+            
+            setTxt('txt-select-terrain', T.selectTerrain);
+            setTxt('txt-mission-sub', T.missionSub);
+            
+            setTxt('btn-finish-reset', T.replay);
+            setTxt('btn-finish-menu', T.toMenu);
+            setTxt('btn-resume', T.resume);
+            setTxt('btn-restart', T.restart);
+            setTxt('btn-quit', T.quit);
+            
+            document.getElementById('btn-lang').textContent = state.lang === 'EN' ? 'EN / JP' : 'JP / EN';
+        }
+
+        // --- IMPORT/EXPORT ---
+        function exportSave() {
+            const data = {
+                settings: state.settings,
+                customStats: state.customStats,
+                lang: state.lang
+            };
+            const blob = new Blob([JSON.stringify(data)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'skyracers_save.json';
+            a.click();
+        }
+        function importSave(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = JSON.parse(evt.target.result);
+                    if(data.settings) {
+                        state.settings = { ...state.settings, ...data.settings };
+                        // Update UI inputs
+                        document.getElementById('input-volume').value = state.settings.volume;
+                        document.getElementById('input-rate').value = state.settings.rate;
+                        document.getElementById('input-expo').value = state.settings.expo;
+                        document.getElementById('input-deadzone').value = state.settings.deadzone;
+                        document.getElementById('input-show').checked = state.settings.showInput;
+                    }
+                    if(data.customStats) state.customStats = data.customStats;
+                    if(data.lang) { state.lang = data.lang; updateText(); }
+                    alert("Data Loaded!");
+                } catch(err) { alert("Invalid Save File"); }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- DOM RENDERING ---
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            document.getElementById(id).classList.remove('hidden');
+            state.menuIndex = 0; // Reset focus
+        }
+        function showPopup(id) { document.getElementById(id).classList.remove('hidden'); state.menuIndex = 0; }
+
+        function updateUI() {
+            const ui = document.getElementById('ui-layer'); ui.classList.remove('hidden');
+            if (state.mode === 'MENU') showScreen('screen-menu');
+            else if (state.mode === 'SELECT') { showScreen('screen-select'); renderTracks(); }
+            else if (state.mode === 'FREE_SELECT') { showScreen('screen-freeselect'); renderTerrains(); }
+            else if (['RACING', 'OPEN_WORLD'].includes(state.mode)) {
+                showScreen('screen-hud');
+                document.getElementById('mission-start-msg').classList.toggle('hidden', state.mode !== 'RACING');
+                if(state.mode==='RACING') document.getElementById('mission-start-msg').classList.remove('opacity-0');
+                document.getElementById('hud-timer-container').classList.toggle('hidden', state.mode !== 'RACING');
+            }
+            updateHUD();
+        }
+
+        function updateHUD() {
+            const hp = document.getElementById('hud-health');
+            hp.textContent = Math.ceil(state.health) + '%';
+            hp.className = state.health < 30 ? 'text-red-500 animate-pulse font-mono' : 'text-blue-400 font-mono';
+            
+            const bat = document.getElementById('hud-battery');
+            bat.textContent = state.battery.toFixed(1) + 'V';
+            bat.className = state.battery < 14 ? "text-red-500 animate-pulse font-bold" : (state.battery < 15 ? "text-yellow-400" : "text-green-400");
+
+            const tm = document.getElementById('hud-timer');
+            if (state.status === 'RUNNING') {
+                tm.textContent = ((Date.now() - state.startTime)/1000).toFixed(2);
+                tm.className = 'text-3xl font-mono font-bold text-white';
+            } else if (state.status === 'READY') {
+                tm.textContent = 'READY';
+                tm.className = 'text-3xl font-mono font-bold text-yellow-400';
+            } else {
+                // If finished, use the stored finishTime
+                tm.textContent = state.finishTime.toFixed(2);
+            }
+            
+            document.getElementById('input-viz-container').classList.toggle('hidden', !state.settings.showInput);
+            if (state.settings.showInput) drawInputViz();
+        }
+
+        function drawInputViz() {
+            const cvs = document.getElementById('input-canvas'); const ctx = cvs.getContext('2d');
+            ctx.clearRect(0,0,cvs.width,cvs.height);
+            ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.fillStyle='rgba(255,255,255,0.9)';
+            const draw = (ox, oy, x, y) => { ctx.beginPath(); ctx.arc(ox, oy, 25, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.arc(ox + x*25, oy - y*25, 4, 0, 7); ctx.fill(); };
+            draw(35, 35, state.lastControls.yaw, state.lastControls.throttle*2 - 1);
+            draw(105, 35, state.lastControls.roll, -state.lastControls.pitch);
+        }
+
+        function renderTracks() {
+            const grid = document.getElementById('selection-grid'); grid.innerHTML = '';
+            document.getElementById('custom-drone-panel').classList.add('hidden');
+            const start = document.getElementById('btn-start-race'); start.disabled = true;
+            
+            TRACKS.forEach(t => {
+                const el = document.createElement('button'); // Changed to button for focusable
+                el.className = `w-full text-left p-4 rounded border cursor-pointer transition-colors ${state.track?.id===t.id ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-800 hover:bg-gray-700'}`;
+                el.innerHTML = `<div class="flex justify-between"><h3 class="font-bold">${t.name}</h3><span class="text-xs bg-gray-700 px-2 rounded">${t.terrain}</span></div><div class="text-xs text-gray-400 mt-2">Gates: ${t.gates}</div>`;
+                el.onclick = () => { state.track = t; renderTracks(); start.disabled = false; };
+                grid.appendChild(el);
+            });
+        }
+
+        function renderDrones() {
+             const grid = document.getElementById('selection-grid'); grid.innerHTML = '';
+             const isCustom = state.droneId === 'custom';
+             document.getElementById('custom-drone-panel').classList.toggle('hidden', !isCustom);
+             
+             CONSTANTS.DRONES.forEach(d => {
+                const el = document.createElement('button');
+                el.className = `w-full text-left p-4 rounded border cursor-pointer ${state.droneId===d.id ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-800'}`;
+                el.innerHTML = `<h3 class="font-bold" style="color:#${d.color.toString(16)}">${d.name}</h3><div class="text-xs text-gray-400 mt-2">Speed: ${d.speed}</div>`;
+                el.onclick = () => { state.droneId=d.id; renderDrones(); };
+                grid.appendChild(el);
+            });
+        }
+
+        function renderTerrains() {
+            const grid = document.getElementById('terrain-grid'); grid.innerHTML = '';
+            Object.values(CONSTANTS.TERRAINS).forEach(t => {
+                const btn = document.createElement('button');
+                btn.className = "p-4 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-center font-bold text-lg transition-all hover:scale-105";
+                btn.textContent = t;
+                btn.onclick = () => initGame('OPEN_WORLD', t);
+                grid.appendChild(btn);
+            });
+        }
+
+        // --- BINDING ---
+        const bind = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
+        bind('btn-mode-timeattack', () => { state.mode='SELECT'; updateUI(); });
+        bind('btn-mode-freeselect', () => { state.mode='FREE_SELECT'; updateUI(); });
+        bind('btn-back-menu', () => initGame('MENU'));
+        bind('btn-back-free', () => initGame('MENU'));
+        bind('btn-start-race', () => state.track && initGame('RACING', state.track.id));
+        bind('btn-pause', togglePause);
+        bind('btn-resume', togglePause);
+        bind('btn-restart', () => { togglePause(); resetRace(); });
+        bind('btn-quit', () => { togglePause(); initGame('MENU'); });
+        bind('btn-finish-reset', resetRace);
+        bind('btn-finish-menu', () => { document.getElementById('popup-finish').classList.add('hidden'); initGame('SELECT'); });
+        
+        // Lang
+        bind('btn-lang', () => { state.lang = state.lang==='EN'?'JP':'EN'; updateText(); });
+        
+        // Tabs
+        bind('tab-tracks', () => { 
+            document.getElementById('tab-tracks').className="px-6 py-2 rounded font-bold bg-blue-600 text-white"; 
+            document.getElementById('tab-drones').className="px-6 py-2 rounded font-bold bg-gray-800 text-gray-400"; 
+            renderTracks(); 
+        });
+        bind('tab-drones', () => { 
+            document.getElementById('tab-drones').className="px-6 py-2 rounded font-bold bg-blue-600 text-white"; 
+            document.getElementById('tab-tracks').className="px-6 py-2 rounded font-bold bg-gray-800 text-gray-400"; 
+            renderDrones(); 
+        });
+
+        // Settings
+        const setPopup = document.getElementById('popup-settings');
+        bind('btn-settings-open', () => setPopup.classList.remove('hidden'));
+        bind('btn-settings-pause', () => { document.getElementById('popup-pause').classList.add('hidden'); setPopup.classList.remove('hidden'); });
+        bind('btn-close-settings', () => { 
+            setPopup.classList.add('hidden'); 
+            if(state.isPaused && state.mode!=='MENU') document.getElementById('popup-pause').classList.remove('hidden'); 
+        });
+        bind('btn-export', exportSave);
+        bind('btn-import', () => document.getElementById('file-import').click());
+        document.getElementById('file-import').onchange = importSave;
+
+        // Settings Inputs
+        document.getElementById('input-volume').oninput = e => { state.settings.volume = parseFloat(e.target.value); document.getElementById('val-volume').innerText = Math.round(state.settings.volume*100)+'%'; };
+        document.getElementById('input-rate').oninput = e => { state.settings.rate = parseFloat(e.target.value); document.getElementById('val-rate').innerText = state.settings.rate; };
+        document.getElementById('input-expo').oninput = e => { state.settings.expo = parseFloat(e.target.value); document.getElementById('val-expo').innerText = state.settings.expo; };
+        document.getElementById('input-deadzone').oninput = e => { state.settings.deadzone = parseFloat(e.target.value); document.getElementById('val-deadzone').innerText = state.settings.deadzone; };
+        document.getElementById('input-show').onchange = e => { state.settings.showInput = e.target.checked; updateUI(); };
+        
+        // Custom Drone Inputs
+        const updateCustom = () => {
+             state.customStats.speed = parseFloat(document.getElementById('input-cust-speed').value);
+             state.customStats.agility = parseFloat(document.getElementById('input-cust-agility').value);
+             state.customStats.weight = parseFloat(document.getElementById('input-cust-weight').value);
+             document.getElementById('val-cust-speed').innerText = state.customStats.speed;
+             document.getElementById('val-cust-agility').innerText = state.customStats.agility;
+             document.getElementById('val-cust-weight').innerText = state.customStats.weight;
+        };
+        document.getElementById('input-cust-speed').oninput = updateCustom;
+        document.getElementById('input-cust-agility').oninput = updateCustom;
+        document.getElementById('input-cust-weight').oninput = updateCustom;
+
+        // --- LOOP ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            updateMenuNavigation();
+            const dt = Math.min(clock.getDelta(), 0.1);
+            if (state.mode === 'MENU') {
+                const t = Date.now() * 0.0005; camera.position.set(Math.sin(t)*100, 50, Math.cos(t)*100); camera.lookAt(0,0,0);
+            } else if (!state.isPaused) {
+                updatePhysics(dt);
+                camera.position.copy(state.pos); camera.quaternion.copy(state.quat);
+                camera.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/6));
+            }
+            renderer.render(scene, camera);
+            updateHUD();
+        }
+
+        document.getElementById('loading-screen').style.opacity = 0;
+        setTimeout(() => document.getElementById('loading-screen').remove(), 500);
+        initGame('MENU');
+        animate();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

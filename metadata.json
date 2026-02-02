@@ -1,0 +1,5 @@
+{
+  "name": "SkyRacers FPV",
+  "description": "A high-fidelity FPV drone racing simulator featuring procedural open worlds, 100+ time-attack tracks, and simulated online multiplayer. Supports Keyboard and Xbox Controllers.",
+  "requestFramePermissions": []
+}
